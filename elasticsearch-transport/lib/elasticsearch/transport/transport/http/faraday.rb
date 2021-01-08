@@ -9,6 +9,9 @@ module Elasticsearch
         # @see Transport::Base
         #
         class Faraday
+          CONTENT_TYPE_STR = "Content-Type"
+          DEFAULT_CONTENT_TYPE = "application/json"
+
           include Base
 
           # Performs the request by invoking {Transport::Base#perform_request} with a block.
@@ -22,7 +25,7 @@ module Elasticsearch
                 method.downcase.to_sym,
                 url,
                 ( body ? __convert_to_json(body) : nil ),
-                {}
+                ( body ? { CONTENT_TYPE_STR => DEFAULT_CONTENT_TYPE } : {} )
               Response.new response.status, response.body, response.headers
             end
           end
