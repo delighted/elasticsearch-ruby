@@ -1,3 +1,5 @@
+require "benchmark"
+
 module Elasticsearch
   module Transport
     module Transport
@@ -43,6 +45,7 @@ module Elasticsearch
           @reload_after    = options[:reload_connections].is_a?(Integer) ? options[:reload_connections] : DEFAULT_RELOAD_AFTER
           @resurrect_after = options[:resurrect_after] || DEFAULT_RESURRECT_AFTER
           @max_retries     = options[:retry_on_failure].is_a?(Integer)   ? options[:retry_on_failure]   : DEFAULT_MAX_RETRIES
+          @benchmark_settings = options[:benchmark_settings] || {}
         end
 
         # Returns a connection from the connection pool by delegating to {Connections::Collection#get_connection}.
@@ -171,7 +174,7 @@ module Elasticsearch
         #
         def perform_request(method, path, params={}, body=nil, &block)
           raise NoMethodError, "Implement this method in your transport class" unless block_given?
-          start = Time.now if logger || tracer
+          start = Time.now # if logger || tracer
           tries = 0
 
           begin
@@ -215,7 +218,8 @@ module Elasticsearch
             raise e
           end
 
-          duration = Time.now-start if logger || tracer
+          duration = Time.now-start # if logger || tracer
+          record_metric("http_request", duration)
 
           if response.status.to_i >= 300
             __log    method, path, params, body, url, response, nil, 'N/A', duration if logger
@@ -224,15 +228,38 @@ module Elasticsearch
             __raise_transport_error response
           end
 
-          json     = serializer.load(response.body) if response.body && !response.body.empty? && response.headers && response.headers["content-type"] =~ /json/
+          json     = deserialize_with_benchmark(response) if response.body && !response.body.empty? && response.headers && response.headers["content-type"] =~ /json/
           took     = (json['took'] ? sprintf('%.3fs', json['took']/1000.0) : 'n/a') rescue 'n/a' if logger || tracer
 
           __log   method, path, params, body, url, response, json, took, duration if logger
           __trace method, path, params, body, url, response, json, took, duration if tracer
+          record_metric("response_size", response.body.bytesize)
+          record_metric("client_server_latency", duration - (took.to_f / 1000))
 
           Response.new response.status, json || response.body, response.headers
         ensure
           @last_request_at = Time.now
+        end
+
+        def record_metric(description, time)
+          if @benchmark_settings[:enabled]
+            ::Rails.logger.info("Benchmark - #{@benchmark_settings[:label]} - #{description} - #{time}")
+          end
+        end
+
+        def deserialize_with_benchmark(response)
+          if @benchmark_settings[:enabled]
+            result = nil
+
+            time = Benchmark.realtime do
+              result = serializer.load(response.body)
+            end
+            record_metric("deserialize_with_benchmark", time)
+
+            result
+          else
+            serializer.load(response.body)
+          end
         end
 
         # @abstract Returns an Array of connection errors specific to the transport implementation.
