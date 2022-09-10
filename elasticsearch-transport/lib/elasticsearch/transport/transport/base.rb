@@ -234,16 +234,23 @@ module Elasticsearch
           __log   method, path, params, body, url, response, json, took, duration if logger
           __trace method, path, params, body, url, response, json, took, duration if tracer
           record_metric("response_size", response.body.bytesize)
-          record_metric("client_server_latency", duration - (took.to_f / 1000))
+          record_metric("client_server_time_delta", duration - (took.to_f / 1000))
 
           Response.new response.status, json || response.body, response.headers
         ensure
           @last_request_at = Time.now
         end
 
-        def record_metric(description, time)
+        def record_metric(description, value)
           if @benchmark_settings[:enabled]
-            ::Rails.logger.info("Benchmark - #{@benchmark_settings[:label]} - #{description} - #{time}")
+            event_timestamp = Time.current
+            data = {
+              event_timestamp: event_timestamp.iso8601(3), # millisecond precision
+              owner: "custom_elasticsearch_client_metrics",
+              version: @benchmark_settings[:version],
+              description => value
+            }
+            @benchmark_settings[:logger].info(data)
           end
         end
 
@@ -254,7 +261,7 @@ module Elasticsearch
             time = Benchmark.realtime do
               result = serializer.load(response.body)
             end
-            record_metric("deserialize_with_benchmark", time)
+            record_metric("deserialization", time)
 
             result
           else
