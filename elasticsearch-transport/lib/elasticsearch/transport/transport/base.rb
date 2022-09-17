@@ -243,7 +243,7 @@ module Elasticsearch
 
         def record_metric(description, value)
           if @benchmark_settings[:enabled]
-            event_timestamp = Time.current
+            event_timestamp = Time.current.utc
             data = {
               event_timestamp: event_timestamp.iso8601(3), # millisecond precision
               owner: "custom_elasticsearch_client_metrics",
